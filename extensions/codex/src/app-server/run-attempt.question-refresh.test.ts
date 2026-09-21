@@ -154,7 +154,8 @@ describe("runCodexAppServerAttempt question refresh", () => {
         });
       }
     }
-    params.onBlockReply = vi.fn();
+    const promptDelivered = createDeferred<void>();
+    params.onBlockReply = vi.fn(() => promptDelivered.resolve());
     const onRunProgress = vi.fn<NonNullable<typeof params.onRunProgress>>((event) => {
       // Host progress fires after the active turn's input bridge is installed.
       if (event.reason === "turn:start") {
@@ -193,7 +194,13 @@ describe("runCodexAppServerAttempt question refresh", () => {
       },
     });
 
-    await vi.waitFor(() => expect(params.onBlockReply).toHaveBeenCalledTimes(1), fastWait);
+    await Promise.race([
+      promptDelivered.promise,
+      response?.then(() => {
+        throw new Error("Input request completed before delivering its prompt");
+      }),
+    ]);
+    expect(params.onBlockReply).toHaveBeenCalledTimes(1);
     await waitAndQueueActiveRunMessage(params.sessionId, "tool progress", { debounceMs: 0 });
     await vi.waitFor(
       () => expect(request.mock.calls.map(([method]) => method)).toContain("turn/steer"),
