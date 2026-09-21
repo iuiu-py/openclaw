@@ -314,6 +314,11 @@ describe("CommandPalette search", () => {
     expect(list).not.toHaveBeenCalled();
     expect(request).not.toHaveBeenCalled();
     expectPalettePromptMode(palette);
+    for (const key of ["ArrowUp", "ArrowDown"]) {
+      const arrow = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      input.dispatchEvent(arrow);
+      expect(arrow.defaultPrevented).toBe(false);
+    }
     const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
     input.dispatchEvent(enter);
     expect(enter.defaultPrevented).toBe(true);
@@ -786,7 +791,7 @@ describe("CommandPalette search", () => {
     });
   });
 
-  it("navigates to the plugin manager from search", async () => {
+  it("flushes a new query on Enter without selecting the retained command", async () => {
     const { gateway } = createGateway(true);
     const { palette } = await mountPalette(
       createContext(
@@ -798,11 +803,19 @@ describe("CommandPalette search", () => {
     await vi.advanceTimersByTimeAsync(200);
     await palette.updateComplete;
 
-    const item = findPaletteOption(palette, "Plugins");
-    expect(item?.textContent).toContain("Plugins");
-    item?.click();
+    const input = palette.querySelector<HTMLTextAreaElement>(".cmd-palette__input")!;
+    input.value = "settings";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await palette.updateComplete;
+    const stale = findPaletteOption(palette, "Plugins")!;
+    expect(stale.getAttribute("aria-disabled")).toBe("true");
+    stale.click();
+    expect(palette.onNavigate).not.toHaveBeenCalled();
 
-    expect(palette.onNavigate).toHaveBeenCalledWith("plugins");
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await palette.updateComplete;
+    expect(palette.onNavigate).toHaveBeenCalledExactlyOnceWith("config");
+    expect(palette.isOpen).toBe(false);
   });
 
   it.each([

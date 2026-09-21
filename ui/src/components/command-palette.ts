@@ -396,7 +396,7 @@ export class CommandPalette extends OpenClawLightDomContentsElement {
     return promise;
   }
 
-  private scheduleSessionSearch(query: string) {
+  private scheduleSessionSearch(query: string, immediate = false) {
     // Retire in-flight results immediately, but keep the settled search visible
     // until the typing burst ends. The view disables selection during this pause.
     this.invalidateSessionSearch();
@@ -417,7 +417,7 @@ export class CommandPalette extends OpenClawLightDomContentsElement {
     if (this.composing) {
       return;
     }
-    this.sessionSearchTimer = globalThis.setTimeout(() => {
+    const applySearch = () => {
       this.clearSessionSearch();
       if (this.searchQuery !== query) {
         this.activeId = null;
@@ -435,7 +435,12 @@ export class CommandPalette extends OpenClawLightDomContentsElement {
       } else {
         this.sessionSearchPending = false;
       }
-    }, SEARCH_DEBOUNCE_MS);
+    };
+    if (immediate) {
+      applySearch();
+    } else {
+      this.sessionSearchTimer = globalThis.setTimeout(applySearch, SEARCH_DEBOUNCE_MS);
+    }
   }
 
   private async searchSessions(search: string) {
@@ -546,12 +551,13 @@ export class CommandPalette extends OpenClawLightDomContentsElement {
 
   override render() {
     this.mentionMenu.syncDirectory(this.draft.mentionDirectory);
-    return renderCommandPalette({
+    return renderCommandPalette(() => ({
       basePath: this.context?.basePath ?? "",
       open: this.open,
       query: this.query,
       searchQuery: this.searchQuery,
       searchDebouncing: this.composing || this.query !== this.searchQuery,
+      onFlushSearch: () => this.scheduleSessionSearch(this.query, true),
       promptMode: this.promptMode,
       mentionMenu: this.mentionMenu,
       mentionHost: this.mentionHost,
@@ -632,7 +638,7 @@ export class CommandPalette extends OpenClawLightDomContentsElement {
       onSlashCommand: this.onSlashCommand,
       onInputRef: this.handleInputRef,
       draft: this.draft,
-    });
+    }));
   }
 }
 

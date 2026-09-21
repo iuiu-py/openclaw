@@ -169,7 +169,7 @@ CPU because Apple silicon Macs and desktop-mode iPads also report it.
 
 Toggle the sidebar with **⌘B** on Mac or **Ctrl+B** on Windows/Linux. Open the command palette with **⌘K** on Mac or **Ctrl+K** on Windows/Linux. Mac **Ctrl+B** and **Ctrl+K** remain available for native text editing.
 
-The search field updates immediately, while command filtering and session searches wait until you pause typing for 200 ms. Previous results stay in place during that pause but cannot be selected until the new query applies. Clearing the field restores the default commands immediately.
+The search field updates immediately, while command filtering and session searches wait until you pause typing for 200 ms. Previous results stay in place during that pause but cannot be selected until the new query applies. Press Enter to apply a pending query immediately and select an available matching result. Clearing the field restores the default commands immediately.
 
 During text composition, the command palette pauses searches and leaves Enter, Escape, and arrow keys to the input method.
 

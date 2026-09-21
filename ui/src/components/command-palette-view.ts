@@ -47,6 +47,7 @@ type CommandPaletteProps = {
   query: string;
   searchQuery: string;
   searchDebouncing: boolean;
+  onFlushSearch: () => void;
   promptMode: boolean;
   activeId: string | null;
   filter: PaletteFilter;
@@ -135,12 +136,8 @@ function scrollActiveIntoView() {
   });
 }
 
-function handleKeydown(
-  event: KeyboardEvent,
-  props: CommandPaletteProps,
-  items: PaletteItem[],
-  activeIndex: number,
-) {
+function handleKeydown(event: KeyboardEvent, readProps: () => CommandPaletteProps) {
+  let props = readProps();
   if (event.defaultPrevented) {
     return;
   }
@@ -186,6 +183,13 @@ function handleKeydown(
   if (props.draft.submitting) {
     return;
   }
+  if (event.key === "Enter" && props.searchDebouncing) {
+    props.onFlushSearch();
+    // Read the applied query and retired rows, not the previous render snapshot.
+    props = readProps();
+  }
+  const { items: matches, activeIndex } = resolvePaletteResults(props);
+  const items = props.searchDebouncing ? [] : matches;
   if (event.key === "Enter") {
     // No matches never turns Enter into Send (or a hidden blank line).
     event.preventDefault();
@@ -212,14 +216,12 @@ function getOptionId(index: number): string {
   return `cmd-palette-option-${index}`;
 }
 
-export function renderCommandPalette(props: CommandPaletteProps) {
-  if (!props.open) {
-    return nothing;
-  }
-  const mentionsOpen = props.mentionMenu.open;
-  const hideSearch = props.promptMode || mentionsOpen || props.draft.mentions.length > 0;
-  const mentionListboxId = paneDomId(props.mentionHost.paneId, "mention-menu-listbox");
-  const mentionAnnouncementId = paneDomId(props.mentionHost.paneId, "mention-announcement");
+function matchesFilter(item: PaletteItem, filter: PaletteFilter) {
+  return filter === "all" || item.category === (filter === "sessions" ? "chats" : "messages");
+}
+
+function resolvePaletteResults(props: CommandPaletteProps) {
+  const hideSearch = props.promptMode || props.mentionMenu.open || props.draft.mentions.length > 0;
   const matches = hideSearch
     ? []
     : filterCommandPaletteItems({
@@ -227,9 +229,26 @@ export function renderCommandPalette(props: CommandPaletteProps) {
         query: props.searchQuery,
         includeSlashCommands: Boolean(props.onSlashCommand),
       });
-  const matchesFilter = (item: PaletteItem, filter: PaletteFilter) =>
-    filter === "all" || item.category === (filter === "sessions" ? "chats" : "messages");
   const grouped = groupItems(matches.filter((item) => matchesFilter(item, props.filter)));
+  const items = grouped.flatMap(([, entries]) => entries);
+  // Preserve explicit selection through transient result changes, but only
+  // highlight and execute current rows; an absent choice selects the first row.
+  const activeIndex = Math.max(
+    0,
+    items.findIndex((item) => item.id === props.activeId),
+  );
+  return { hideSearch, matches, grouped, items, activeIndex };
+}
+
+export function renderCommandPalette(readProps: () => CommandPaletteProps) {
+  const props = readProps();
+  if (!props.open) {
+    return nothing;
+  }
+  const mentionsOpen = props.mentionMenu.open;
+  const mentionListboxId = paneDomId(props.mentionHost.paneId, "mention-menu-listbox");
+  const mentionAnnouncementId = paneDomId(props.mentionHost.paneId, "mention-announcement");
+  const { hideSearch, matches, grouped, items, activeIndex } = resolvePaletteResults(props);
   const notices = [
     props.sessionSearchFailed
       ? t("palette.searchFailed")
@@ -244,13 +263,6 @@ export function renderCommandPalette(props: CommandPaletteProps) {
         })
       : null,
   ].filter((notice): notice is string => Boolean(notice));
-  const items = grouped.flatMap(([, entries]) => entries);
-  // Preserve explicit selection through transient result changes, but only
-  // highlight and execute current rows; an absent choice selects the first row.
-  const activeIndex = Math.max(
-    0,
-    items.findIndex((item) => item.id === props.activeId),
-  );
   const activeOptionId =
     !props.searchDebouncing && items[activeIndex] ? getOptionId(activeIndex) : undefined;
   const paletteLabel = t("palette.placeholder");
@@ -295,7 +307,7 @@ export function renderCommandPalette(props: CommandPaletteProps) {
       <div
         class="cmd-palette ${hideSearch ? "cmd-palette--prompt" : ""}"
         @click=${(e: Event) => e.stopPropagation()}
-        @keydown=${(e: KeyboardEvent) => handleKeydown(e, props, props.searchDebouncing ? [] : items, activeIndex)}
+        @keydown=${(e: KeyboardEvent) => handleKeydown(e, readProps)}
       >
         ${renderCommandPaletteInput({
           value: props.query,

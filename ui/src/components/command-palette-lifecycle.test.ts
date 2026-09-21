@@ -106,6 +106,21 @@ describe("CommandPalette lifecycle", () => {
     expect(palette.textContent).not.toContain("Old chat");
   });
 
+  it("keeps local filtering usable if the connection drops during typing", async () => {
+    const { gateway, setConnected } = createGateway(true);
+    const list = vi.fn(async () => null);
+    const { palette } = await mountPalette(createContext(gateway, list));
+    await enterQuery(palette, "plugins");
+    await vi.advanceTimersByTimeAsync(100);
+    setConnected(false);
+    await palette.updateComplete;
+    await vi.advanceTimersByTimeAsync(200);
+    await palette.updateComplete;
+    expect(list).not.toHaveBeenCalled();
+    findPaletteOption(palette, "Plugins", true)!.click();
+    expect(palette.onNavigate).toHaveBeenCalledWith("plugins");
+  });
+
   it("retries the pending query after the gateway reconnects", async () => {
     const harness = createGateway(true);
     const stale = createDeferred<SessionsListResult | null>();
