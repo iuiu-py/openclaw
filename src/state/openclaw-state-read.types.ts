@@ -9,6 +9,7 @@ import type {
   ExecutionIdentityInspectionQuery,
   ExecutionIdentityInspectionOutcome,
 } from "../audit/execution-identity-inspection.types.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type {
   CronRunRecoveryReadCommand,
   CronRunRecoveryObservation,
@@ -18,6 +19,8 @@ import type {
   ListTerminalOperatorApprovalsInput,
   ListTerminalOperatorApprovalsResult,
 } from "../gateway/operator-approval-store.types.js";
+import type { SessionGroupCatalogSnapshot } from "../gateway/session-group-catalog.types.js";
+import type { SessionGroupMembershipSnapshot } from "../gateway/session-group-membership.read.js";
 import type {
   WorkerPlacementConflictBinding,
   WorkerSessionPlacementReadResult,
@@ -81,6 +84,8 @@ export type OpenClawStateReadCommand =
       };
     }[keyof SkillLibraryReadOnlyOperations]
   | { type: "agentDatabaseRegistry.read" }
+  | { type: "sessionGroups.snapshot" }
+  | { type: "sessionGroups.members"; cfg: OpenClawConfig }
   | { type: "onboardingRecommendations.read"; configKey: string }
   | { type: "userProfiles.reconcile"; profileId: string }
   | { type: "userProfiles.email.resolve"; email: string }
@@ -133,6 +138,18 @@ export type OpenClawStateReadReply = (
         value: SkillLibraryReadOnlyOperations[Kind]["output"];
       };
     }[keyof SkillLibraryReadOnlyOperations]
+  | {
+      ok: true;
+      type: "sessionGroups.members";
+      sourceAdmitted: true;
+      snapshot: SessionGroupMembershipSnapshot;
+    }
+  | {
+      ok: true;
+      type: "sessionGroups.snapshot";
+      sourceAdmitted: true;
+      snapshot: SessionGroupCatalogSnapshot;
+    }
   | {
       ok: true;
       type: "userProfiles.email.resolve";
