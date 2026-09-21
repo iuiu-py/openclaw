@@ -10,6 +10,7 @@ import {
   closeOpenClawStateDatabaseByPathAsync,
 } from "./openclaw-state-db-cache.js";
 import { executeExistingOpenClawStateRead } from "./openclaw-state-db-readonly.js";
+import { withExistingOpenClawStateSchema } from "./openclaw-state-db-schema-policy.js";
 import type {
   OpenClawStateReadPhase,
   OpenClawStateReadReply,
@@ -89,6 +90,30 @@ it("maps synchronous read admission refusal once before read work", () => {
   expect(mock.run).not.toHaveBeenCalled();
   expect(mock.close).not.toHaveBeenCalled();
 });
+
+it.each(["read admission", "schema scope"] as const)(
+  "maps captured %s retirement once before read work",
+  async (kind) => {
+    const options = source();
+    const context =
+      kind === "schema scope"
+        ? withExistingOpenClawStateSchema({ path: options.path }, () =>
+            captureOpenClawStateWorkerContext(options),
+          )
+        : captureOpenClawStateWorkerContext(options);
+    if (kind === "read admission") {
+      await closeOpenClawStateDatabaseByPathAsync(options.path);
+    }
+    const { mapped, mapError } = mapper();
+    expect(() =>
+      executeExistingOpenClawStateRead(options, { type: "fleet.list" }, { context, mapError }),
+    ).toThrow(mapped);
+    expect(mapError).toHaveBeenCalledOnce();
+    expect(mapError.mock.calls[0]?.[1]).toBe("before-read");
+    expect(mock.run).not.toHaveBeenCalled();
+    expect(mock.close).not.toHaveBeenCalled();
+  },
+);
 
 it("maps an authoritative pre-read error after cleanup", async () => {
   const original = new Error("source admission failed");
