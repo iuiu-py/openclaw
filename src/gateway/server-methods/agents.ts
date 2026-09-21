@@ -108,31 +108,7 @@ import { agentListHandler } from "./agents-list.js";
 import type { GatewayRequestHandlers, RespondFn } from "./types.js";
 import { assertValidParams } from "./validation.js";
 
-const agentsHandlerDeps = {
-  root,
-  isWorkspaceSetupCompleted,
-};
-const agentFileHandlers = createAgentFileHandlers(agentsHandlerDeps);
-
-export const testing = {
-  setDepsForTests(
-    overrides: Partial<{
-      root: typeof root;
-      isWorkspaceSetupCompleted: typeof isWorkspaceSetupCompleted;
-    }>,
-  ) {
-    if (overrides.isWorkspaceSetupCompleted) {
-      agentsHandlerDeps.isWorkspaceSetupCompleted = overrides.isWorkspaceSetupCompleted;
-    }
-    if (overrides.root) {
-      agentsHandlerDeps.root = overrides.root;
-    }
-  },
-  resetDepsForTests() {
-    agentsHandlerDeps.root = root;
-    agentsHandlerDeps.isWorkspaceSetupCompleted = isWorkspaceSetupCompleted;
-  },
-};
+const agentFileHandlers = createAgentFileHandlers({ root, isWorkspaceSetupCompleted });
 
 function respondAgentNotFound(respond: RespondFn, agentId: string): void {
   respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, `agent "${agentId}" not found`));
@@ -180,7 +156,7 @@ function cleanupPathIdentity(stat: { dev?: number | bigint; ino?: number | bigin
 
 async function statAgentCleanupPath(cleanupPath: AgentDeleteCleanupPath) {
   const parentPath = cleanupPath.parentPath;
-  const parentRoot = await agentsHandlerDeps.root(parentPath, {
+  const parentRoot = await root(parentPath, {
     hardlinks: "reject",
     symlinks: "reject",
   });
@@ -531,7 +507,7 @@ async function writeWorkspaceFileOrRespond(params: {
   }
   await fs.mkdir(params.workspaceDir, { recursive: true });
   try {
-    const workspaceRoot = await agentsHandlerDeps.root(params.workspaceDir);
+    const workspaceRoot = await root(params.workspaceDir);
     await workspaceRoot.write(params.name, params.content, { encoding: "utf8" });
   } catch (err) {
     if (err instanceof FsSafeError) {
@@ -562,7 +538,7 @@ async function readWorkspaceFileContent(
       }
       return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(data);
     }
-    const workspaceRoot = await agentsHandlerDeps.root(workspaceDir);
+    const workspaceRoot = await root(workspaceDir);
     const safeRead = await workspaceRoot.read(name, {
       hardlinks: "reject",
       nonBlockingRead: true,
