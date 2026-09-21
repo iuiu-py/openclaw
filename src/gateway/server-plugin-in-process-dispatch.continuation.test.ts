@@ -7,8 +7,10 @@ import {
   runWithGatewayToolContinuationContext,
 } from "../agents/tools/in-process-gateway.js";
 import { runSessionsSendA2AFlow } from "../agents/tools/sessions-send-tool.a2a.js";
+import { upsertSessionEntryCore } from "../config/sessions/session-accessor.js";
 import { withPluginRuntimeGatewayRequestScope } from "../plugins/runtime/gateway-request-scope.js";
 import { createDeferredCore } from "../shared/deferred.js";
+import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import {
   captureGatewayDeviceRevocation,
   invalidateGatewayDeviceRevocation,
@@ -38,6 +40,81 @@ describe("typed in-process agent continuation authorization", () => {
     startTurn.mockReset();
     waitForTurn.mockReset();
   });
+
+  it.each([false, true])(
+    "preserves roles-enabled dispatch without promoting scoped unknown callers (%s)",
+    async (scopedUnknown) => {
+      await withOpenClawTestState({ scenario: "minimal" }, async () => {
+        const context = createContext();
+        context.getRuntimeConfig = () => ({
+          agents: { list: [{ id: "main" }] },
+          gateway: {
+            roles: {
+              default: "limited",
+              definitions: {
+                limited: {
+                  sessions: { others: "none" },
+                  agents: ["guest"],
+                  scopes: ["operator.write"],
+                },
+              },
+            },
+          },
+        });
+        const sessionKey = "agent:main:requester";
+        await upsertSessionEntryCore(
+          { agentId: "main", sessionKey },
+          {
+            sessionId: "requester-session",
+            updatedAt: 1,
+            visibility: "shared",
+            createdActor: { type: "human", source: "profile", id: "session-owner" },
+          },
+        );
+        const unknownClient = {
+          ...createOperatorClient({ profileId: "unknown", scopes: ["operator.write"] }),
+          authenticatedUserId: undefined,
+          authenticatedUserProfile: undefined,
+        };
+        const result = { runId: "system-reply", status: "ok" };
+        startTurn.mockImplementation(async ({ io }) =>
+          io.emitAcceptance([true, result, undefined]),
+        );
+        await withPluginRuntimeGatewayRequestScope(
+          {
+            context,
+            resolveGatewayContext: () => context,
+            isWebchatConnect: () => false,
+            ...(scopedUnknown ? { client: unknownClient } : {}),
+          },
+          async () => {
+            const dispatch = () =>
+              callAgentToolGatewayRequest({
+                method: "agent",
+                params: {
+                  sessionKey,
+                  message: "Return the accepted result",
+                  idempotencyKey: "system-reply",
+                },
+              });
+            if (!scopedUnknown) {
+              await expect(dispatch()).resolves.toEqual(result);
+              expect(startTurn).toHaveBeenCalledOnce();
+              startTurn.mockClear();
+            }
+            const continuation = runWithGatewayToolContinuationContext(dispatch);
+            if (scopedUnknown) {
+              await expect(continuation).rejects.toThrow(/not found|cannot create|identity/i);
+              expect(startTurn).not.toHaveBeenCalled();
+            } else {
+              await expect(continuation).resolves.toEqual(result);
+              expect(startTurn).toHaveBeenCalledOnce();
+            }
+          },
+        );
+      });
+    },
+  );
 
   it.each(["disconnected", "device revoked", "gateway replaced"] as const)(
     "settles sessions_send after its requester ends (%s)",

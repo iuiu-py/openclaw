@@ -163,6 +163,7 @@ export async function runWithOperatorToolGatewayContinuationContext<T>(
   // before transferring its source. A cleanup scope alone retains request lifetime.
   const resolved = resolveInProcessGatewayDispatch("agent", {
     forceSyntheticClient: true,
+    operatorRoleActor: { kind: "system" },
     resolveGatewayContext,
     ...(scopes ? { syntheticScopes: [...scopes] } : {}),
   });

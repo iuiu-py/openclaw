@@ -57,6 +57,7 @@ vi.mock("./in-process-gateway.js", () => ({
   getInProcessGatewayToolContext: () => undefined,
   hasGatewayToolRoutingContext: () => false,
   runWithGatewayToolCleanupContext: <T>(run: () => T): T => run(),
+  runWithGatewayToolContinuationContext: async <T>(run: () => Promise<T>): Promise<T> => run(),
 }));
 vi.mock("../../plugin-sdk/facade-runtime.js", async () => {
   const actual = await vi.importActual<typeof import("../../plugin-sdk/facade-runtime.js")>(
