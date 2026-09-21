@@ -319,7 +319,7 @@ test.each(["directory discovery", "Gateway send", "durable completion"] as const
     let authorizerDelayMs: number | undefined;
     const withWorker = reclamationWorker.withSqliteReclamationWorker;
     vi.spyOn(reclamationWorker, "withSqliteReclamationWorker").mockImplementation(
-      (workerOptions, claim, run, assertCurrent) =>
+      (workerOptions, claim, run, assertCurrent, signal) =>
         withWorker(
           workerOptions,
           claim,
@@ -355,6 +355,7 @@ test.each(["directory discovery", "Gateway send", "durable completion"] as const
             }
           },
           assertCurrent,
+          signal,
         ),
     );
     const workers = observeReclamationWorkers();
@@ -528,7 +529,7 @@ test.each(["admission", "commit"] as const)(
     let revoked = false;
     let closeElapsedMs = 0;
     vi.spyOn(reclamationWorker, "withSqliteReclamationWorker").mockImplementation(
-      (options, claim, run, assertRequestCurrent) =>
+      (options, claim, run, assertRequestCurrent, signal) =>
         withWorker(
           options,
           claim,
@@ -561,6 +562,7 @@ test.each(["admission", "commit"] as const)(
             }
           },
           assertRequestCurrent,
+          signal,
         ),
     );
     await expect(
@@ -577,7 +579,7 @@ test.each(["admission", "commit"] as const)(
 );
 
 test.each(["path", "root"] as const)(
-  "joins queued cold reclamation before %s retirement returns",
+  "cancels queued cold reclamation before unrelated work settles during %s retirement",
   async (retirement) => {
     const fixture = createFixture();
     await closeOpenClawAgentDatabaseByPathAsync(fixture.database.path);
@@ -589,8 +591,8 @@ test.each(["path", "root"] as const)(
     const observed: { claim?: OpenClawAgentDatabaseClaim } = {};
     const withWorker = reclamationWorker.withSqliteReclamationWorker;
     vi.spyOn(reclamationWorker, "withSqliteReclamationWorker").mockImplementation(
-      (options, claim, run, assertRequestCurrent) => {
-        const result = withWorker(options, claim, run, assertRequestCurrent);
+      (options, claim, run, assertRequestCurrent, signal) => {
+        const result = withWorker(options, claim, run, assertRequestCurrent, signal);
         observed.claim = claim;
         enqueued.resolve();
         return result;
@@ -621,14 +623,17 @@ test.each(["path", "root"] as const)(
         },
       );
       await yieldToEventLoop();
-      expect(closeSettled).toBe(false);
-      releaseQueue.resolve();
+      expect(closeSettled).toBe(true);
       await expect(request).rejects.toThrow(/revoked|no longer current|admission.*changed/i);
       await closing;
       expect(observed.claim?.isCurrent()).toBe(false);
       expect(spawned).toHaveLength(0);
       expect(loadSessionEntryReadOnly(fixture.scopes[0]!)).toMatchObject({ sessionId: "first" });
       expect(leasesFor(fixture)).toHaveLength(0);
+      releaseQueue.resolve();
+      await holding;
+      await archiveWorker.runExclusiveSqliteTranscriptArchiveWorker(async () => {});
+      expect(spawned).toHaveLength(0);
     } finally {
       releaseQueue.resolve();
       await Promise.allSettled([holding, request, ...(closing ? [closing] : [])]);
@@ -645,7 +650,7 @@ test("retires the previous database before opening a different agent store", asy
   let closeRetained: (() => Promise<void>) | undefined;
   const withWorker = reclamationWorker.withSqliteReclamationWorker;
   vi.spyOn(reclamationWorker, "withSqliteReclamationWorker").mockImplementation(
-    (options, claim, run, assertRequestCurrent) =>
+    (options, claim, run, assertRequestCurrent, signal) =>
       withWorker(
         options,
         claim,
@@ -662,6 +667,7 @@ test("retires the previous database before opening a different agent store", asy
           return run(worker);
         },
         assertRequestCurrent,
+        signal,
       ),
   );
   let firstSpawned: Worker | undefined;

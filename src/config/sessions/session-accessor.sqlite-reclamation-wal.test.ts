@@ -38,7 +38,7 @@ vi.mock("./session-accessor.sqlite-reclamation-worker.js", async (importOriginal
     await importOriginal<typeof import("./session-accessor.sqlite-reclamation-worker.js")>();
   return {
     ...actual,
-    withSqliteReclamationWorker: ((options, claim, run, assertRequestCurrent) =>
+    withSqliteReclamationWorker: ((options, claim, run, assertRequestCurrent, signal) =>
       actual.withSqliteReclamationWorker(
         options,
         claim,
@@ -61,6 +61,7 @@ vi.mock("./session-accessor.sqlite-reclamation-worker.js", async (importOriginal
           }
         },
         assertRequestCurrent,
+        signal,
       )) satisfies typeof actual.withSqliteReclamationWorker,
   };
 });
