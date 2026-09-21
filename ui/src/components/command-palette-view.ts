@@ -45,6 +45,8 @@ type CommandPaletteProps = {
   basePath: string;
   open: boolean;
   query: string;
+  searchQuery: string;
+  searchDebouncing: boolean;
   promptMode: boolean;
   activeId: string | null;
   filter: PaletteFilter;
@@ -95,7 +97,7 @@ const paletteInputId = COMMAND_PALETTE_INPUT_ID;
 const paletteListboxId = "cmd-palette-listbox";
 
 function selectItem(item: PaletteItem, props: CommandPaletteProps) {
-  if (props.draft.submitting) {
+  if (props.draft.submitting || props.searchDebouncing) {
     return;
   }
   if (item.action.startsWith("nav:")) {
@@ -222,6 +224,7 @@ export function renderCommandPalette(props: CommandPaletteProps) {
     ? []
     : filterCommandPaletteItems({
         ...props,
+        query: props.searchQuery,
         includeSlashCommands: Boolean(props.onSlashCommand),
       });
   const matchesFilter = (item: PaletteItem, filter: PaletteFilter) =>
@@ -248,7 +251,8 @@ export function renderCommandPalette(props: CommandPaletteProps) {
     0,
     items.findIndex((item) => item.id === props.activeId),
   );
-  const activeOptionId = items[activeIndex] ? getOptionId(activeIndex) : undefined;
+  const activeOptionId =
+    !props.searchDebouncing && items[activeIndex] ? getOptionId(activeIndex) : undefined;
   const paletteLabel = t("palette.placeholder");
   const startLabel = t(props.draft.submitting ? "palette.startingSession" : "palette.startSession");
   const startDisabled = props.composing || !props.draft.canSubmit;
@@ -256,7 +260,7 @@ export function renderCommandPalette(props: CommandPaletteProps) {
     props.draft.disabledReason ?? (props.draft.hasPrompt ? undefined : t("palette.promptRequired"));
   const startShortcut = formatKeyboardShortcutCombo(KEYBOARD_SHORTCUT_COMBOS.modifiedEnter);
   const searchSettled =
-    Boolean(props.query.trim()) &&
+    Boolean(props.searchQuery.trim()) &&
     !props.sessionSearchPending &&
     !props.catalogSearchPending &&
     !props.modelSearchError &&
@@ -291,7 +295,7 @@ export function renderCommandPalette(props: CommandPaletteProps) {
       <div
         class="cmd-palette ${hideSearch ? "cmd-palette--prompt" : ""}"
         @click=${(e: Event) => e.stopPropagation()}
-        @keydown=${(e: KeyboardEvent) => handleKeydown(e, props, items, activeIndex)}
+        @keydown=${(e: KeyboardEvent) => handleKeydown(e, props, props.searchDebouncing ? [] : items, activeIndex)}
       >
         ${renderCommandPaletteInput({
           value: props.query,
@@ -375,7 +379,7 @@ export function renderCommandPalette(props: CommandPaletteProps) {
                 ? noChange
                 : html`
                     ${
-                      props.query.trim() && props.onSelectSession
+                      props.searchQuery.trim() && props.onSelectSession
                         ? html`<div
                             class="cmd-palette__filters"
                             role="group"
@@ -397,7 +401,7 @@ export function renderCommandPalette(props: CommandPaletteProps) {
                       class="cmd-palette__results"
                       ?hidden=${items.length === 0}
                       role="listbox"
-                      aria-busy=${props.sessionSearchPending || props.catalogSearchPending ? "true" : "false"}
+                      aria-busy=${props.searchDebouncing || props.sessionSearchPending || props.catalogSearchPending ? "true" : "false"}
                     >
                       ${grouped.map(
                         ([category, groupedItems]) => html`
@@ -422,14 +426,14 @@ export function renderCommandPalette(props: CommandPaletteProps) {
                                 class="cmd-palette__item ${item.session ? "cmd-palette__item--session" : ""} ${isActive ? "cmd-palette__item--active" : ""}"
                                 role="option"
                                 aria-selected=${isActive ? "true" : "false"}
-                                aria-disabled=${props.draft.submitting ? "true" : nothing}
+                                aria-disabled=${props.draft.submitting || props.searchDebouncing ? "true" : nothing}
                                 @click=${(e: Event) => {
                                   e.stopPropagation();
                                   selectItem(item, props);
                                 }}
                                 @mouseenter=${() => props.onActiveIdChange(item.id)}
                               >
-                                ${renderCommandPaletteResult(item, props.query, agent, props.agentIdentity?.get(agentId))}
+                                ${renderCommandPaletteResult(item, props.searchQuery, agent, props.agentIdentity?.get(agentId))}
                               </div>
                             `;
                           })}
