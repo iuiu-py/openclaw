@@ -378,16 +378,16 @@ export async function updateGitCheckout(params: {
         }
         return { status: "ok" as const };
       };
-      if (
-        !(await fetchGitUpdateTarget({
-          root: inspectionRoot,
-          step: inspectionStep,
-          workStep: inspectionWorkStep,
-          name: "git-target-inspection-fetch",
-          channel,
-          steps,
-        }))
-      ) {
+      const fetched = await fetchGitUpdateTarget({
+        root: inspectionRoot,
+        step: inspectionStep,
+        workStep: inspectionWorkStep,
+        name: "git-target-inspection-fetch",
+        channel,
+        devTarget,
+        steps,
+      });
+      if (!fetched.ok) {
         return { status: "error" as const, reason: "fetch-failed" };
       }
       const inspectTarget = async (revision: string, root = inspectionRoot) => {
@@ -407,6 +407,7 @@ export async function updateGitCheckout(params: {
         workTimeoutMs: opts.timeoutMs,
         channel,
         devTarget,
+        refreshedRemotes: fetched.refreshedRemotes,
         beforeSha,
         beforeGitStaging: opts.beforeGitStaging,
         needsCheckoutMain,
