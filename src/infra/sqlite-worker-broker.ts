@@ -127,7 +127,9 @@ export class SqliteWorkerBroker {
       return Promise.reject(toErrorObject(error, "SQLite worker input could not be serialized"));
     }
     return this.inputAdmission
-      .open(snapshot.input.byteLength, () => this.openAdmitted<Operations>(snapshot, client))
+      .open(snapshot.input.byteLength + (snapshot.preparation?.byteLength ?? 0), () =>
+        this.openAdmitted<Operations>(snapshot, client),
+      )
       .catch((error: unknown) => {
         this.clients.delete(client);
         throw error;
@@ -222,11 +224,12 @@ export class SqliteWorkerBroker {
               : {}),
           ...(options.existingOnly ? { existingIdentity: key } : {}),
           input,
+          ...(options.preparation ? { preparation: options.preparation } : {}),
           ...(/\.[cm]?ts$/.test(modulePath)
             ? { sourceLoaderUrl: import.meta.resolve("tsx/esm/api") }
             : {}),
         },
-        input.byteLength,
+        input.byteLength + (options.preparation?.byteLength ?? 0),
         {
           dispatchState: opening.openDispatch,
           assertCurrent: options.assertCurrent,

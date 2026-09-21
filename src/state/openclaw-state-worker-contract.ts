@@ -25,6 +25,7 @@ import type { OperatorApprovalWorkerOperations } from "../gateway/operator-appro
 import type { DeferredPluginMigration } from "../infra/deferred-plugin-migrations.js";
 import type { DeliveryQueueWorkerOperations } from "../infra/delivery-queue.worker-contract.js";
 import type * as deviceAuth from "../infra/device-auth-store.kernel.js";
+import type { DeviceIdentity } from "../infra/device-identity-store.js";
 import type { DevicePairingWorkerOperations } from "../infra/device-pairing-worker-contract.js";
 import type { ExecAuthorizationWorkerOperations } from "../infra/exec-approvals-contracts.js";
 import type { CurrentConversationBindingWorkerOperations } from "../infra/outbound/current-conversation-bindings.worker-contract.js";
@@ -75,6 +76,8 @@ import type {
 import type { UserPreferenceWorkerOperations } from "./user-preferences.types.js";
 import type { UserProfileWorkerOperations } from "./user-profiles.worker.js";
 
+export type OpenClawStateWorkerOpenPreparation = { type: "deviceIdentity"; identityKey: string };
+
 /** Commands share one physical shared-state actor; bindings belong to commands, not open input. */
 export type OpenClawStateWorkerOperations = CurrentConversationBindingWorkerOperations &
   WebPushWorkerOperations &
@@ -99,6 +102,8 @@ export type OpenClawStateWorkerOperations = CurrentConversationBindingWorkerOper
   TranscriptWriteOperations &
   NodeWorkerJournalWorkerOperations &
   TaskRegistryWorkerOperations & {
+    "deviceIdentity.read": { input: { identityKey: string }; output: DeviceIdentity | null };
+    "deviceIdentity.load": { input: { identityKey: string }; output: DeviceIdentity };
     "githubRepository.personalPending": {
       input: RepositoryGitHubPublicationPendingQuery;
       output: RepositoryGitHubPublicationStatusRow | undefined;
@@ -275,6 +280,7 @@ export type OpenClawStateWorkerBackend = SqliteWorkerPreparedBackend<
 
 /** Host-only admission options; never serialized with a worker command. */
 export type OpenClawStateWorkerOperationOptions = {
+  preparation?: OpenClawStateWorkerOpenPreparation;
   /** Acquire matching lifecycle custody for each dispatched command. */
   requireStateLifecycle?: boolean;
   existingOnly?: boolean;

@@ -29,6 +29,8 @@ export const databaseWorkerCoreTestFiles = [
   "src/node-host/invoke.test.ts",
   "src/node-host/worker-runtime.test.ts",
   "src/skills/workshop/store.test.ts",
+  "src/cli/node-cli/identity.test.ts",
+  "src/node-host/local-id.test.ts",
   "src/state/onboarding-recommendations.test.ts",
   "src/commands/onboard-recommendations.test.ts",
   "src/wizard/setup.app-recommendations.test.ts",

@@ -370,9 +370,9 @@ function createSharedStateWorkerOwner() {
     },
     async open(
       context: OpenClawStateWorkerContext,
-      existingOnly = false,
-      assertCurrent?: () => void,
+      options: Pick<OperationOptions, "existingOnly" | "assertCurrent" | "preparation"> = {},
     ): Promise<Store | undefined> {
+      const { existingOnly = false, assertCurrent, preparation } = options;
       const { admission } = context;
       const assertAdmission = () => {
         admission.assertCurrent();
@@ -480,6 +480,7 @@ function createSharedStateWorkerOwner() {
               assertOpeningAdmission,
               {
                 maintenanceScope: context.maintenanceScope,
+                preparation,
                 retainCleanup: (cleanup) => {
                   admitted.cleanup = cleanup;
                 },
@@ -523,11 +524,11 @@ function createSharedStateWorkerOwner() {
       if (!store) {
         stores.delete(entry);
         return !existingOnly && entry.existingOnly
-          ? this.open(context, false, assertCurrent)
+          ? this.open(context, { ...options, existingOnly: false })
           : undefined;
       }
       if (!stores.has(entry)) {
-        return this.open(context, existingOnly, assertCurrent);
+        return this.open(context, options);
       }
       clearIdleRetirement(entry);
       const actorRetirement = entry.actor ? retiringActors.get(entry.actor) : undefined;
@@ -535,11 +536,11 @@ function createSharedStateWorkerOwner() {
         actorRetirement.entries.add(entry);
         stores.delete(entry);
         await joinActorRetirement(actorRetirement);
-        return this.open(context, existingOnly, assertCurrent);
+        return this.open(context, options);
       }
       if (!isSqliteWorkerStoreAvailable(store) && !hasActiveActorOperations(entry)) {
         await (entry.actor ? retireActor(entry.actor, admission.identity) : retire(entry));
-        return this.open(context, existingOnly, assertCurrent);
+        return this.open(context, options);
       }
       try {
         if (!entry.bound) {
@@ -626,7 +627,7 @@ async function runAdmittedOpenClawStateWorkerOperation<T>(
     }
     context.admission.assertCurrent();
     options?.assertCurrent?.();
-    const store = await owner().open(context, options?.existingOnly, options?.assertCurrent);
+    const store = await owner().open(context, options);
     context.admission.assertCurrent();
     if (!store) {
       if (options?.existingOnly) {
@@ -679,7 +680,7 @@ async function inspectAdmittedOpenClawStateDatabase(
   },
 ): Promise<boolean | undefined> {
   try {
-    const store = await owner().open(context, true);
+    const store = await owner().open(context, { existingOnly: true });
     context.admission.assertCurrent();
     if (!store) {
       return undefined;
