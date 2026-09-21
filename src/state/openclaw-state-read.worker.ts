@@ -15,6 +15,10 @@ import { getFleetCellInDatabase, listFleetCellsInDatabase } from "../fleet/regis
 import { listTerminalOperatorApprovalsInDatabase } from "../gateway/operator-approval-store.kernel.js";
 import { readWorkerSessionPlacementProjectionInDatabase } from "../gateway/worker-environments/placement-read-projection.js";
 import { readWorkerPlacementChangeSnapshotInDatabase } from "../gateway/worker-environments/placement-row-codec.js";
+import {
+  readWorkerEnvironmentFacts,
+  readWorkerEnvironmentPrunePage,
+} from "../gateway/worker-environments/store-row-codec.js";
 import { executeDevicePairingRead } from "../infra/device-pairing-read.kernel.js";
 import { readExecApprovalsConfigRow } from "../infra/exec-approvals-sqlite.js";
 import { inspectCurrentConversationBindingRecordInDatabase } from "../infra/outbound/current-conversation-bindings.kernel.js";
@@ -111,6 +115,19 @@ function isReadRequest(input: unknown): input is OpenClawStateReadRequest {
             isRecord(pin) && typeof pin.skillId === "string" && typeof pin.revision === "string",
         )) ||
       input.command.type === "agentDatabaseRegistry.read" ||
+      (input.command.type === "workerEnvironments.snapshot" &&
+        (input.command.ids === undefined ||
+          (Array.isArray(input.command.ids) &&
+            input.command.ids.every((id) => typeof id === "string")))) ||
+      (input.command.type === "workerEnvironments.pruneCandidates" &&
+        isRecord(input.command.input) &&
+        typeof input.command.input.nowMs === "number" &&
+        (input.command.input.limit === undefined ||
+          typeof input.command.input.limit === "number") &&
+        (input.command.input.cursor === undefined ||
+          (isRecord(input.command.input.cursor) &&
+            typeof input.command.input.cursor.changedAtMs === "number" &&
+            typeof input.command.input.cursor.environmentId === "string"))) ||
       (input.command.type === "userProfiles.reconcile" &&
         typeof input.command.profileId === "string") ||
       (input.command.type === "userProfiles.email.resolve" &&
@@ -282,6 +299,24 @@ serveOwnedWorkerTasks(
                     type: command.type,
                     sourceAdmitted,
                     row: readExecApprovalsConfigRow(db),
+                  };
+                }
+                if (command.type === "workerEnvironments.snapshot") {
+                  return {
+                    ok: true,
+                    type: command.type,
+                    sourceAdmitted,
+                    facts: runSqliteDeferredTransactionSync(db, () =>
+                      readWorkerEnvironmentFacts(db, command.ids),
+                    ),
+                  };
+                }
+                if (command.type === "workerEnvironments.pruneCandidates") {
+                  return {
+                    ok: true,
+                    type: command.type,
+                    sourceAdmitted,
+                    page: readWorkerEnvironmentPrunePage(db, command.input),
                   };
                 }
                 if (command.type === "skills.library.descriptions") {
