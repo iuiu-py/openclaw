@@ -741,7 +741,7 @@ it.each(["single", "union"] as const)(
     const dispatch = createDeferredCore();
     const task = queueTask(dispatch.promise);
     const result = executeExistingOpenClawStateRead(
-      {},
+      { path: context.admission.databasePath, env: context.environment },
       { type: "tasks.mutationSnapshot", input },
       { context },
     );
