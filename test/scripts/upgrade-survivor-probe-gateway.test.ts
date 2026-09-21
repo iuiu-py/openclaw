@@ -58,8 +58,11 @@ function runProbe(
       clearTimeout(timer);
       resolve({ error, signal: null, status: null, stderr: stderr.text(), stdout: stdout.text() });
     });
-    child.on("exit", (status, signal) => {
+    child.on("exit", () => {
       clearTimeout(timer);
+    });
+    // Process exit can precede the final stdout/stderr data events.
+    child.on("close", (status, signal) => {
       resolve({
         error: timedOut ? new Error(`probe timed out after ${timeout}ms`) : undefined,
         signal,
@@ -326,9 +329,15 @@ describe("scripts/e2e/lib/upgrade-survivor/probe-gateway.mjs", () => {
       nodeArgs,
     );
 
-    expect(result.error).toBeUndefined();
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain(`${baseUrl}/healthz probe body exceeded 64 bytes`);
+    expect(result).toMatchObject({
+      error: undefined,
+      signal: null,
+      status: expect.any(Number),
+    });
+    expect(result.status, JSON.stringify(result)).not.toBe(0);
+    expect(result.stderr, JSON.stringify(result)).toContain(
+      `${baseUrl}/healthz probe body exceeded 64 bytes`,
+    );
     expect(fs.existsSync(out)).toBe(false);
   });
 
