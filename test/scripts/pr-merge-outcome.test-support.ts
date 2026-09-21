@@ -543,6 +543,10 @@ else if(args[0]==="pr"&&args[1]==="view") {
   if(args.includes("--jq")) {const q=args[args.indexOf("--jq")+1];out(q===".state"?pr.state:q===".mergeCommit.oid"?pr.mergeCommit?.oid??"null":pr.url);}
   else out(pr);
 } else if((args[0]==="pr"&&args[1]==="merge")||restMerge||graphqlMerge) {
+  if(s.mode==="local-auto-refusal") {
+    if(!args.includes("--auto")) fail("expected local auto-merge refusal");
+    fail("error: string rewrite protection blocked unsafe input");
+  }
   s.mutations++;
   if(s.quotaAt==="mutation") {s.quotaAt="observe";quota();}
   if(restMerge) {
@@ -725,7 +729,7 @@ begin_pr_operation_validation_phase
 if [ -n "\${5:-}" ]; then
   merge_complete 123 "$5"
 else
-  merge_run 123 "\${1:-false}" "\${2:-}" "\${3:-}" "\${4:-}" "\${6:-}" "\${7:-false}"
+  merge_run 123 "\${1:-false}" "\${2:-}" "\${3:-}" "\${4:-}" "\${6:-}" "\${7:-false}" "\${8:-}"
 fi
 `,
     );
@@ -760,6 +764,7 @@ fi
       completionOid = "",
       legacyDirectory = "",
       cancelAuto = false,
+      localRefusalDirectory = "",
     ) => {
       const result = spawnSync(
         nodeExecutable,
@@ -774,6 +779,7 @@ fi
           completionOid,
           legacyDirectory,
           String(cancelAuto),
+          localRefusalDirectory,
         ],
         {
           cwd,
@@ -940,6 +946,30 @@ Run the following to resolve the merge conflicts locally:
     };
   }
 
+  function createLocalAutoRefusal(f: ReturnType<typeof fixture>, outcome: string) {
+    const directory = join(f.root, "local-refusal-evidence");
+    mkdirSync(directory);
+    const capture = f.captures()[0]!;
+    const manifest = {
+      kind: "octopool-auto-pre-dispatch-refusal",
+      client: { version: "0.6.10", revision: "00c442d8084ad26eb5a5003f7372170e75a20c8a" },
+      outcome,
+      argv: f
+        .state()
+        .calls.findLast((call) => call[1] === "pr" && call[2] === "merge")!
+        .slice(1),
+      capture: {
+        name: capture[0],
+        oid: f.git(["hash-object", "--no-filters", "--stdin"], capture[1]),
+      },
+    };
+    const files = { "refusal.json": JSON.stringify(manifest), [capture[0]]: capture[1] };
+    for (const [name, contents] of Object.entries(files)) {
+      writeFileSync(join(directory, name), contents);
+    }
+    return { directory, manifest, files };
+  }
+
   function reconciledMergeAfterCleanup(admin = false) {
     const f = fixture();
     f.save({ ...f.state(), mode: "applied-open", admin, gates: admin ? "fail" : "pass" });
@@ -964,6 +994,7 @@ Run the following to resolve the merge conflicts locally:
     fixture,
     expectNoProbeFetch,
     createLegacyRefusal,
+    createLocalAutoRefusal,
     reconciledMergeAfterCleanup,
     outcomeRef,
     lockRef,

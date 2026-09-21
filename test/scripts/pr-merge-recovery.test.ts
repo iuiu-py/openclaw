@@ -1,9 +1,18 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { createMergeOutcomeFixtureHarness } from "./pr-merge-outcome.test-support.js";
 
-const { fixture, outcomeRef, describePosix } = createMergeOutcomeFixtureHarness();
+const {
+  fixture,
+  createLocalAutoRefusal,
+  outcomeRef,
+  describePosix,
+  scripts,
+  nodeExecutable,
+  gitEnv,
+} = createMergeOutcomeFixtureHarness();
 
 describePosix("native merge outcome with real Git and supervised lock recovery", () => {
   it("reconciles uncertain dispatch without the body and accepts a body only for explicit recovery", () => {
@@ -29,6 +38,220 @@ describePosix("native merge outcome with real Git and supervised lock recovery",
     expect(f.state().mergeBody).toBe("Corrected retry message");
     expect(f.state().mutations).toBe(2);
   });
+
+  it("rejects unqualified local auto evidence and incomplete same-head gates", () => {
+    const f = fixture();
+    f.save({
+      ...f.state(),
+      mode: "local-auto-refusal",
+      pr: { ...f.state().pr, mergeStateStatus: "BEHIND" },
+    });
+    const refused = f.run(true);
+    expect(refused.status, refused.output).toBe(1);
+    const previous = f.git(["rev-parse", outcomeRef]);
+    const evidence = createLocalAutoRefusal(f, previous);
+    const originalCapture = join(f.worktree, ".local", evidence.manifest.capture.name);
+    const evidenceCapture = join(evidence.directory, evidence.manifest.capture.name);
+    const manifestPath = join(evidence.directory, "refusal.json");
+    const extraCapture = join(f.worktree, ".local/merge-output.other.log");
+    const calls = f.state().calls;
+    for (const fault of [
+      "missing-manifest",
+      "version",
+      "revision",
+      "outcome",
+      "head",
+      "repository",
+      "admin",
+      "unknown-network-failure",
+      "different-original",
+      "symlink",
+      "other-attempt",
+    ]) {
+      const manifest = structuredClone(evidence.manifest);
+      rmSync(evidenceCapture, { force: true });
+      rmSync(extraCapture, { force: true });
+      for (const [name, contents] of Object.entries(evidence.files)) {
+        writeFileSync(join(evidence.directory, name), contents);
+      }
+      writeFileSync(originalCapture, evidence.files[manifest.capture.name]!);
+      if (fault === "version") {
+        manifest.client.version = "0.6.11";
+      }
+      if (fault === "revision") {
+        manifest.client.revision = f.head;
+      }
+      if (fault === "outcome") {
+        manifest.outcome = f.base;
+      }
+      if (fault === "head") {
+        manifest.argv[8] = f.base;
+      }
+      if (fault === "repository") {
+        manifest.argv[4] = "https://github.com/fixture/other";
+      }
+      if (fault === "admin") {
+        manifest.argv.splice(6, 0, "--admin");
+      }
+      if (fault === "unknown-network-failure") {
+        const capture = "HTTP 502: request outcome unknown\n";
+        writeFileSync(evidenceCapture, capture);
+        writeFileSync(originalCapture, capture);
+        manifest.capture.oid = f.git(["hash-object", "--no-filters", "--stdin"], capture);
+      }
+      if (fault === "different-original") {
+        writeFileSync(originalCapture, "different attempt\n");
+      }
+      if (fault === "symlink") {
+        rmSync(evidenceCapture);
+        symlinkSync(originalCapture, evidenceCapture);
+      }
+      if (fault === "other-attempt") {
+        writeFileSync(extraCapture, "uncertain\n");
+      }
+      writeFileSync(manifestPath, JSON.stringify(manifest));
+      if (fault === "missing-manifest") {
+        rmSync(manifestPath);
+      }
+      const checked = spawnSync(
+        nodeExecutable,
+        [
+          join(scripts, "pr-lib/merge-legacy-refusal.mjs"),
+          "--local-auto",
+          evidence.directory,
+          previous,
+        ],
+        { cwd: f.worktree, env: gitEnv, encoding: "utf8" },
+      );
+      expect(checked.status, `${fault}: ${checked.stdout}${checked.stderr}`).toBe(1);
+    }
+    expect(f.state().calls).toEqual(calls);
+    rmSync(extraCapture);
+    for (const [name, contents] of Object.entries(evidence.files)) {
+      writeFileSync(join(evidence.directory, name), contents);
+    }
+    writeFileSync(originalCapture, evidence.files[evidence.manifest.capture.name]!);
+    f.recover();
+    f.save({ ...f.state(), mode: "success", pr: { ...f.state().pr, mergeStateStatus: "CLEAN" } });
+    writeFileSync(
+      join(f.worktree, ".local/gates.env"),
+      `PR_NUMBER=123\nGATES_MODE=github_pending\nLAST_VERIFIED_HEAD_SHA=${f.head}\n`,
+    );
+    const recovered = f.run(
+      false,
+      f.repo,
+      "squash",
+      previous,
+      "",
+      "",
+      "",
+      "",
+      false,
+      evidence.directory,
+    );
+    expect(recovered.status, recovered.output).toBe(1);
+    expect(recovered.output).toContain("completed gate stamps");
+    expect(f.state()).toMatchObject({ mutations: 0, posts: 0, cancellations: 0 });
+    expect(f.git(["rev-parse", outcomeRef])).toBe(previous);
+  });
+
+  it.each(["graphql", "rest"])(
+    "recovers one source-qualified local auto refusal over %s and retains its original evidence",
+    (transport) => {
+      const f = fixture();
+      f.save({
+        ...f.state(),
+        mode: "local-auto-refusal",
+        pr: { ...f.state().pr, mergeStateStatus: "BEHIND" },
+      });
+      const refused = f.run(true);
+      expect(refused.status, refused.output).toBe(1);
+      expect(f.state().mutations).toBe(0);
+      const previous = f.git(["rev-parse", outcomeRef]);
+      const original = f.record();
+      expect(original).toMatchObject({ phase: "intent", route: "auto", accepted: false });
+      const evidence = createLocalAutoRefusal(f, previous);
+      f.recover();
+      f.save({
+        ...f.state(),
+        mode: "success",
+        restPolicy: transport === "rest" ? "supported" : "classic",
+        quotaAt: transport === "rest" ? "checks" : "",
+        pr: { ...f.state().pr, mergeStateStatus: "CLEAN" },
+      });
+
+      const recovered = f.run(
+        false,
+        f.repo,
+        "squash",
+        previous,
+        "",
+        "",
+        "",
+        "",
+        false,
+        evidence.directory,
+      );
+      expect(recovered.status, recovered.output).toBe(0);
+      expect(f.state()).toMatchObject({ mutations: 1, posts: 1, cancellations: 0 });
+      expect(f.record()).toMatchObject({
+        phase: "complete",
+        route: "immediate",
+        head: f.head,
+        recovery: {
+          outcome: previous,
+          attempt: original.attempt,
+          actor: "fixture-operator",
+          localRefusal: {
+            kind: "octopool-auto-pre-dispatch-refusal",
+            client: evidence.manifest.client,
+          },
+        },
+      });
+      if (transport === "rest") {
+        expect(f.record()).toHaveProperty("transport", "rest");
+        expect(f.state().restMergePayload).toMatchObject({ sha: f.head, merge_method: "squash" });
+        expect(f.state().calls.filter((call) => call.includes("PUT"))).toHaveLength(1);
+        expect(f.state().graphqlMergePayloads).toEqual([]);
+      } else {
+        expect(f.record()).not.toHaveProperty("transport");
+        expect(f.state().restMergePayload).toBeNull();
+        expect(f.state().graphqlMergePayloads).toHaveLength(1);
+        expect(f.state().graphqlMergePayloads[0]).toMatchObject({
+          pullRequestId: f.state().pr.id,
+          expectedHeadOid: f.head,
+          mergeMethod: "SQUASH",
+        });
+      }
+      expect(
+        f.state().calls.filter((call) => call[1] === "pr" && call[2] === "merge"),
+      ).toHaveLength(1);
+      expect(JSON.parse(f.git(["show", `${previous}:outcome.json`]))).toEqual(original);
+      f.git(["merge-base", "--is-ancestor", previous, outcomeRef]);
+      rmSync(evidence.directory, { recursive: true });
+      f.git(["reflog", "expire", "--expire=now", "--all"]);
+      f.git(["gc", "--prune=now"]);
+      for (const [name, contents] of Object.entries(evidence.files)) {
+        expect(f.git(["rev-parse", `${outcomeRef}:local-refusal/${name}`])).toBe(
+          f.git(["hash-object", "--no-filters", "--stdin"], contents),
+        );
+      }
+      const replay = f.run(
+        false,
+        f.repo,
+        "squash",
+        previous,
+        "",
+        "",
+        "",
+        "",
+        false,
+        evidence.directory,
+      );
+      expect(replay.status, replay.output).toBe(1);
+      expect(f.state().mutations).toBe(1);
+    },
+  );
 
   it.each([
     { replacement: false, reviewHead: "current", forwardMain: false },
