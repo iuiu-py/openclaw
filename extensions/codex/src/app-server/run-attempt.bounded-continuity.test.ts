@@ -1,12 +1,15 @@
 import path from "node:path";
 import { SessionManager } from "openclaw/plugin-sdk/agent-sessions";
-import { describe, expect, it } from "vitest";
+import { initializeGlobalHookRunner } from "openclaw/plugin-sdk/hook-runtime";
+import { createMockPluginRegistry } from "openclaw/plugin-sdk/plugin-test-runtime";
+import { describe, expect, it, vi } from "vitest";
 import { readMirroredSessionHistoryMessages } from "./attempt-context.js";
 import {
   assistantMessage,
   createParams,
   createResumeHarness,
   createStartedThreadHarness,
+  mockCall,
   runCodexAppServerAttempt,
   setupRunAttemptTestHooks,
   tempDir,
@@ -17,9 +20,11 @@ import { attachSqliteSessionTarget } from "./sqlite-session.test-helpers.js";
 
 setupRunAttemptTestHooks();
 
-async function createHistory() {
+async function createHistory(provider = "codex") {
   const sessionId = "bounded-continuity";
-  const params = createParams(`agent:main:${sessionId}`, path.join(tempDir, "workspace"));
+  const params = createParams(`agent:main:${sessionId}`, path.join(tempDir, "workspace"), {
+    provider,
+  });
   await attachSqliteSessionTarget(params, path.join(tempDir, "session.sqlite"), sessionId);
   params.contextTokenBudget = 1_024;
   params.prompt = "Give me the TLDR of your explanation.";
@@ -163,6 +168,111 @@ describe("Codex bounded assistant continuity", () => {
       expect(text).toContain(params.prompt);
       expect(text).not.toContain("<conversation_context>");
       expect(text).not.toContain("synthetic tool payload");
+    },
+  );
+  it.each([false, true])(
+    "applies prompt hooks once per build without duplicating current input (continuity: %s)",
+    async (withHistory) => {
+      const llmInput = vi.fn();
+      const beforePromptBuild = vi.fn(async (_event: unknown) => ({
+        systemPrompt: "custom codex system",
+        prependSystemContext: "pre system",
+        appendSystemContext: "post system",
+        prependContext: "queued context",
+        appendContext: "tail context",
+        toolsAllow: ["*"],
+      }));
+      initializeGlobalHookRunner(
+        createMockPluginRegistry([
+          { hookName: "before_prompt_build", handler: beforePromptBuild },
+          { hookName: "llm_input", handler: llmInput },
+        ]),
+      );
+      const { params, manager } = await createHistory("openai");
+      params.prompt = "hello";
+      if (withHistory) {
+        manager.appendMessage(assistantMessage("previous turn", Date.now()));
+      }
+      const harness = createStartedThreadHarness();
+      params.inputProvenance = { kind: "inter_session", sourceTool: "sessions_send" };
+      params.config = {
+        ...params.config,
+        agents: { defaults: { model: { primary: "openai/gpt-5.5" } } },
+      };
+      const run = runCodexAppServerAttempt(params);
+      await harness.waitForMethod("turn/start");
+      await harness.completeTurn({ threadId: "thread-1", turnId: "turn-1" });
+      await run;
+      // The first build fixes thread instructions; a new-thread continuity projection
+      // rebuilds only turn input after the actual startup lifecycle is known.
+      expect(beforePromptBuild).toHaveBeenCalledTimes(withHistory ? 2 : 1);
+      const [hookInput, hookContext] = mockCall(beforePromptBuild, "before_prompt_build") as [
+        {
+          messages?: Array<{ content?: Array<{ text?: string; type?: string }>; role?: string }>;
+          prompt?: string;
+          currentUserMessage?: string;
+        },
+        { runId?: string; sessionId?: string },
+      ];
+      expect(hookInput.prompt).toBe("hello");
+      expect(hookInput.messages).toEqual(
+        withHistory
+          ? [
+              expect.objectContaining({
+                role: "assistant",
+                content: [{ type: "text", text: "previous turn" }],
+              }),
+            ]
+          : [],
+      );
+      for (const [event] of beforePromptBuild.mock.calls) {
+        expect(event).toMatchObject({ currentUserMessage: "hello" });
+      }
+      const lastHookInput = mockCall(
+        beforePromptBuild,
+        "before_prompt_build",
+        withHistory ? 1 : 0,
+      )[0] as typeof hookInput;
+      if (withHistory) {
+        expect(lastHookInput.prompt).toContain("[assistant]\nprevious turn");
+        expect(lastHookInput.prompt).toMatch(
+          /<\/conversation_context>\n\nCurrent user request:\nhello$/,
+        );
+      } else {
+        expect(lastHookInput.prompt).toBe("hello");
+      }
+      expect(lastHookInput.prompt).not.toContain("queued context");
+      expect(lastHookInput.prompt).not.toContain("tail context");
+      const expectedInput = `queued context\n\n${lastHookInput.prompt}\n\ntail context`;
+      expect(hookContext.runId).toBe("run-1");
+      expect(hookContext.sessionId).toBe(params.sessionId);
+      expect(hookContext).toMatchObject({
+        modelProviderId: params.provider,
+        modelId: params.modelId,
+        inputProvenance: { kind: "inter_session", sourceTool: "sessions_send" },
+      });
+      const threadStart = harness.requests.find((request) => request.method === "thread/start");
+      const threadStartParams = threadStart?.params as
+        | { developerInstructions?: string }
+        | undefined;
+      const wrappedPluginSystemContext = (text: string) =>
+        `---\n\nOpenClaw plugin-injected system context. This block is not workspace file content.\n\n${text}\n\n---`;
+      expect(threadStartParams?.developerInstructions).toContain(
+        `${wrappedPluginSystemContext("pre system")}\n\ncustom codex system\n\n${wrappedPluginSystemContext("post system")}`,
+      );
+      const turnStart = harness.requests.find((request) => request.method === "turn/start");
+      const turnStartParams = turnStart?.params as
+        | { input?: Array<{ text?: string; text_elements?: unknown[]; type?: string }> }
+        | undefined;
+      expect(turnStartParams?.input).toEqual([
+        { type: "text", text: expectedInput, text_elements: [] },
+      ]);
+      const [llmInputPayload] = mockCall(llmInput, "llm_input") as [
+        { historyMessages?: unknown[]; prompt?: string },
+        unknown,
+      ];
+      expect(llmInputPayload.prompt).toBe(expectedInput);
+      expect(llmInputPayload.historyMessages).toEqual([]);
     },
   );
 });
