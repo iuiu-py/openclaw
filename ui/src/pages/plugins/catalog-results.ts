@@ -65,6 +65,7 @@ const CATEGORY_ICONS: Readonly<Record<string, TemplateResult>> = {
   globe: icons.globe,
   "message-circle": icons.messageSquare,
   "message-square": icons.messageSquare,
+  mic: icons.mic,
   package: icons.box,
   palette: icons.palette,
   shield: icons.shield,
